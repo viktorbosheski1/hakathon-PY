@@ -1,0 +1,257 @@
+import os
+from typing import List, Optional, Dict, Any
+import chromadb
+from chromadb.config import Settings
+from langchain_openai import AzureOpenAIEmbeddings
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+class ChromaDBManager:
+    """Manages ChromaDB connections and operations"""
+    
+    def __init__(self):
+        self.use_remote = os.getenv("USE_REMOTE_CHROMA", "false").lower() == "true"
+        
+        # Initialize Azure OpenAI Embeddings
+        azure_endpoint = os.getenv("AZURE_TARGET_URL_EMBEDDING")
+        azure_api_key = os.getenv("AZURE_API_KEY_EMBEDDING")
+        
+        # Extract deployment name and base URL from the endpoint
+        # Format: https://{resource}.cognitiveservices.azure.com/openai/deployments/{deployment}/embeddings?api-version={version}
+        deployment_name = os.getenv("API_EMBEDDING_MODEL_NAME")
+        azure_base_url = os.getenv("AZURE_TARGET_URL_EMBEDDING")
+        
+        self.embeddings_model = AzureOpenAIEmbeddings(
+            azure_endpoint=azure_base_url,
+            azure_deployment=deployment_name,
+            api_key=azure_api_key,
+            api_version=os.getenv("API_VERSION_EMBEDDING", "2024-12-01-preview")
+        )
+        
+        self.client = self._initialize_client()
+        self.collection = self._get_or_create_collection()
+    
+    def _initialize_client(self):
+        """Initialize ChromaDB client based on configuration"""
+        if self.use_remote:
+            chroma_host = os.getenv("CHROMA_HOST")
+            chroma_port = int(os.getenv("CHROMA_PORT", 8000))
+            
+            client = chromadb.HttpClient(
+                host=chroma_host,
+                port=chroma_port
+            )
+            print(f"Connected to remote ChromaDB at {chroma_host}:{chroma_port}")
+        else:
+            client = chromadb.PersistentClient(path="./chroma_db")
+            print("Using local ChromaDB storage at ./chroma_db")
+        
+        return client
+    
+    def _get_or_create_collection(self):
+        """Get or create the compliance documents collection"""
+        collection_name = "compliance_documents"
+        try:
+            collection = self.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"description": "Compliance documents and embeddings"}
+            )
+            return collection
+        except Exception as e:
+            print(f"Error initializing collection: {e}")
+            return None
+    
+    def add_document_chunks(
+        self,
+        chunks: List[str],
+        doc_id: str,
+        filename: str,
+        document_type: str,
+        department: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        page_numbers: Optional[List[int]] = None
+    ) -> int:
+        """
+        Add document chunks to ChromaDB with metadata
+        
+        Args:
+            chunks: List of text chunks
+            doc_id: Unique document identifier
+            filename: Original filename
+            document_type: Type of document
+            department: Department associated with document
+            tags: List of tags
+            page_numbers: Page number for each chunk
+            
+        Returns:
+            Number of chunks stored
+        """
+        if not self.collection:
+            raise Exception("ChromaDB collection not initialized")
+        
+        stored_chunks = 0
+        
+        for idx, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}_chunk_{idx}"
+            
+            # Generate embedding
+            embedding = self.embeddings_model.embed_query(chunk)
+            
+            # Prepare metadata
+            chunk_metadata = {
+                "document_id": doc_id,
+                "filename": filename,
+                "document_type": document_type,
+                "chunk_index": idx,
+                "total_chunks": len(chunks),
+            }
+            
+            if page_numbers and idx < len(page_numbers):
+                chunk_metadata["page_number"] = page_numbers[idx]
+            
+            if department:
+                chunk_metadata["department"] = department
+            
+            if tags:
+                chunk_metadata["tags"] = ",".join(tags)
+            
+            # Add to ChromaDB
+            self.collection.add(
+                ids=[chunk_id],
+                embeddings=[embedding],
+                documents=[chunk],
+                metadatas=[chunk_metadata]
+            )
+            stored_chunks += 1
+        
+        return stored_chunks
+    
+    def search_documents(
+        self,
+        query: str,
+        n_results: int = 5,
+        document_type: Optional[str] = None,
+        department: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for relevant document chunks
+        
+        Args:
+            query: Search query
+            n_results: Number of results to return
+            document_type: Filter by document type
+            department: Filter by department
+            
+        Returns:
+            List of search results with metadata
+        """
+        if not self.collection:
+            raise Exception("ChromaDB collection not initialized")
+        
+        # Generate query embedding
+        query_embedding = self.embeddings_model.embed_query(query)
+        
+        # Prepare where filter
+        where_filter = {}
+        if document_type:
+            where_filter["document_type"] = document_type
+        if department:
+            where_filter["department"] = department
+        
+        # Search in ChromaDB
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_results,
+            where=where_filter if where_filter else None
+        )
+        
+        # Format results
+        formatted_results = []
+        if results and results['ids']:
+            for idx in range(len(results['ids'][0])):
+                formatted_results.append({
+                    "id": results['ids'][0][idx],
+                    "content": results['documents'][0][idx],
+                    "metadata": results['metadatas'][0][idx],
+                    "distance": results['distances'][0][idx] if 'distances' in results else None
+                })
+        
+        return formatted_results
+    
+    def list_all_documents(self) -> List[Dict[str, Any]]:
+        """
+        List all unique documents in the database
+        
+        Returns:
+            List of documents with their metadata
+        """
+        if not self.collection:
+            raise Exception("ChromaDB collection not initialized")
+        
+        # Get all items from collection
+        results = self.collection.get()
+        
+        # Extract unique document IDs and their metadata
+        documents = {}
+        for metadata in results['metadatas']:
+            doc_id = metadata.get('document_id')
+            if doc_id and doc_id not in documents:
+                documents[doc_id] = {
+                    "document_id": doc_id,
+                    "filename": metadata.get('filename'),
+                    "document_type": metadata.get('document_type'),
+                    "department": metadata.get('department'),
+                    "tags": metadata.get('tags'),
+                    "total_chunks": metadata.get('total_chunks', 0)
+                }
+        
+        return list(documents.values())
+    
+    def delete_document(self, document_id: str) -> int:
+        """
+        Delete a document and all its chunks
+        
+        Args:
+            document_id: Document ID to delete
+            
+        Returns:
+            Number of chunks deleted
+        """
+        if not self.collection:
+            raise Exception("ChromaDB collection not initialized")
+        
+        # Get all chunks for this document
+        results = self.collection.get(
+            where={"document_id": document_id}
+        )
+        
+        if not results['ids']:
+            raise ValueError("Document not found")
+        
+        # Delete all chunks
+        self.collection.delete(ids=results['ids'])
+        
+        return len(results['ids'])
+    
+    def get_health_status(self) -> Dict[str, Any]:
+        """
+        Get health status of ChromaDB connection
+        
+        Returns:
+            Dictionary with health status information
+        """
+        try:
+            collections = self.client.list_collections()
+            return {
+                "status": "healthy",
+                "chroma_connection": "connected",
+                "chroma_type": "remote" if self.use_remote else "local",
+                "collections": [col.name for col in collections]
+            }
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "error": str(e)
+            }
