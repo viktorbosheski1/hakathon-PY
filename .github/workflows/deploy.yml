@@ -48,7 +48,7 @@ jobs:
 
       - name: Deploy to EC2 via SSM
         run: |
-          echo "Deploying to EC2..."
+          echo "🚀 Deploying to EC2..."
           aws ssm send-command \
             --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
             --document-name "AWS-RunShellScript" \
@@ -58,14 +58,14 @@ jobs:
               "echo === Pulling latest image ===",
               "docker pull ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest",
               "echo === Stopping old container ===",
-              "docker stop compliance-app || true",
-              "docker rm compliance-app || true",
+              "docker stop compliance-ai || true",
+              "docker rm compliance-ai || true",
               "echo === Starting new container ===",
-              "docker run -d --name compliance-app -p 8000:8000 --restart unless-stopped ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest",
+              "docker run -d --name compliance-ai -p 8000:8000 --restart unless-stopped ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest",
               "echo === Deployment complete ===",
-              "docker ps | grep compliance-app"
+              "docker ps | grep compliance-ai"
             ]' \
             --comment "Deploy from GitHub Actions" \
             --output text
           
-          echo "Deployment command sent to EC2"
+          echo "✅ Deployment command sent to EC2"
