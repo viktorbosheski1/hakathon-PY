@@ -135,7 +135,7 @@ class PostgreSQLManager:
                 """
                 # ORDER BY question_vector <=> %s::vector
 
-                cursor.execute(query_sql, (query_embedding, query_embedding, n_results * 2))  # Fetch more for reranking
+                cursor.execute(query_sql, (query_embedding, n_results))  # Fetch more for reranking
                 
             except psycopg2.Error as e:
                 # Fallback: fetch all records and calculate similarity in Python
@@ -209,6 +209,95 @@ class PostgreSQLManager:
         except Exception as e:
             print(f"Error searching Q&A: {e}")
             raise Exception(f"Error searching Q&A in PostgreSQL: {str(e)}")
+    
+    def store_qa_from_document(self, document_id: str) -> Dict[str, Any]:
+        """
+        Retrieve Q&A pairs from question_documents_data table and store them in documents table with embeddings
+        
+        Args:
+            document_id: The document ID to filter questions and answers
+            
+        Returns:
+            Dictionary with insertion results
+        """
+        try:
+            # Connect to PostgreSQL
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Retrieve all questions and answers for the given document_id
+            select_sql = """
+                SELECT question, answer_final
+                FROM public.question_documents_data
+                WHERE document_id = %s
+                AND question IS NOT NULL 
+                AND answer_final IS NOT NULL
+                AND question != ''
+                AND answer_final != ''
+            """
+            
+            cursor.execute(select_sql, (document_id,))
+            rows = cursor.fetchall()
+            
+            if not rows:
+                cursor.close()
+                conn.close()
+                return {
+                    "status": "success",
+                    "message": f"No Q&A pairs found for document_id: {document_id}",
+                    "document_id": document_id,
+                    "pairs_stored": 0
+                }
+            
+            # Process each Q&A pair
+            inserted_count = 0
+            from datetime import datetime
+            
+            for row in rows:
+                question = row[0]
+                answer = row[1]
+                
+                # Generate embeddings
+                question_embedding = self.embeddings_model.embed_query(question)
+                answer_embedding = self.embeddings_model.embed_query(answer)
+                
+                # Insert into documents table
+                insert_sql = """
+                    INSERT INTO public.documents 
+                    (question, answer_final, question_vector, answer_vector, source, updated_at)
+                    VALUES (%s, %s, %s::vector, %s::vector, %s, %s, %s)
+                """
+                
+                current_time = datetime.now()
+                source = f"document_{document_id}"
+                
+                cursor.execute(insert_sql, (
+                    question,
+                    answer,
+                    question_embedding,
+                    answer_embedding,
+                    source,
+                    current_time
+                ))
+                
+                inserted_count += 1
+            
+            # Commit the transaction
+            conn.commit()
+            
+            cursor.close()
+            conn.close()
+            
+            return {
+                "status": "success",
+                "message": f"Successfully stored Q&A pairs from document {document_id}",
+                "document_id": document_id,
+                "pairs_stored": inserted_count
+            }
+            
+        except Exception as e:
+            print(f"Error storing Q&A from document: {e}")
+            raise Exception(f"Error storing Q&A pairs: {str(e)}")
     
     def get_health_status(self) -> Dict[str, Any]:
         """

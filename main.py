@@ -31,6 +31,7 @@ async def root():
             "ingest_document": "/ingest-document",
             "search_internal_documents": "/search_internal_documents",
             "search_qa": "/search_qa",
+            "store_new_qa": "/store_new_qa",
             "list_documents": "/documents",
             "answer_question": "/answer-question"
         }
@@ -74,12 +75,13 @@ async def ingest_doc(
         # Determine file extension
         file_ext = file.filename.lower().split('.')[-1]
         
-        # Save uploaded file temporarily
-        suffix = f'.{file_ext}'
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        # Save uploaded file temporarily with original filename
+        temp_dir = tempfile.gettempdir()
+        tmp_file_path = os.path.join(temp_dir, file.filename)
+        
+        with open(tmp_file_path, 'wb') as tmp_file:
             content = await file.read()
             tmp_file.write(content)
-            tmp_file_path = tmp_file.name
 
         # Strip whitespace and validate document_type
         document_type = document_type.strip() if document_type else "internal-document"
@@ -90,6 +92,7 @@ async def ingest_doc(
             if file_ext != 'pdf':
                 raise ValueError("Internal documents must be PDF files")
             
+            print("-------TEST Ingesting internal document...")
             # Use ingest_pdf function
             result = await ingest_pdf(
                 file_path=tmp_file_path,
@@ -127,7 +130,7 @@ async def ingest_doc(
 @app.get("/search_internal_documents")
 async def search_internal_documents(
     query: str,
-    n_results: int = 1,
+    n_results: int = 5,
     document_type: Optional[str] = None,
     department: Optional[str] = None
 ):
@@ -152,11 +155,13 @@ async def search_internal_documents(
             document_type=document_type,
             department=department
         )
+
+        filtered_results = [result for result in results if result['similarity'] > 0.1]
         
         return {
             "query": query,
-            "results_count": len(results),
-            "results": results
+            "results_count": len(filtered_results),
+            "results": filtered_results
         }
     
     except Exception as e:
@@ -194,6 +199,28 @@ async def search_qa(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching Q&A: {str(e)}")
+
+
+@app.post("/store_new_qa")
+async def store_new_qa(document_id: str = Form(...)):
+    """
+    Store Q&A pairs from question_documents_data table into documents table with embeddings
+    
+    Parameters:
+    - document_id: The document ID to retrieve Q&A pairs from
+    
+    Returns:
+    - status: Success or error status
+    - message: Description of the operation
+    - document_id: The document ID processed
+    - pairs_stored: Number of Q&A pairs stored
+    """
+    try:
+        result = pg_manager.store_qa_from_document(document_id=document_id)
+        return result
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error storing Q&A pairs: {str(e)}")
 
 
 @app.get("/documents")
@@ -286,32 +313,33 @@ async def answer_question(question: str):
             score_qa = 0.0
         
         # Step 2: Search internal documents
-        relevant_document = ""
+        relevant_documents = []
         try:
             print(f"Searching internal documents for: {question}")
             internal_results = db_manager.search_documents(
                 query=question,
-                n_results=1
+                n_results=5
             )
             print(f"Internal documents search returned {len(internal_results) if internal_results else 0} results")
             if internal_results and len(internal_results) > 0:
-                relevant_document = internal_results[0].get("content", "")
-                print(f"Found relevant document with {len(relevant_document)} characters")
+                # relevant_documents = [result.get("content", "") for result in internal_results]
+                relevant_documents = internal_results
+                print(f"Found {len(relevant_documents)} relevant documents")
             else:
                 print("No internal documents found")
         except Exception as e:
             print(f"Error searching internal documents: {e}")
             import traceback
             traceback.print_exc()
-            relevant_document = ""
+            relevant_documents = []
         
         # Step 3: Use LLM to generate answer from internal documents
-        if llm_helper and relevant_document:
+        if llm_helper and relevant_documents:
             try:
                 llm_response = llm_helper.get_internal_documents_answer(
                     question=question,
                     answer_qa=answer_qa,
-                    relevant_document=relevant_document
+                    relevant_documents=relevant_documents
                 )
                 answer_internal_documents = llm_response.get("answer", "")
                 score_internal_documents = float(llm_response.get("score", 0.0))
@@ -324,8 +352,8 @@ async def answer_question(question: str):
         else:
             if not llm_helper:
                 print("LLM helper not initialized")
-            if not relevant_document:
-                print("No relevant document found for LLM processing")
+            if not relevant_documents:
+                print("No relevant documents found for LLM processing")
         
         # Step 4: Use LLM to generate combined answer
         if llm_helper and (answer_qa or answer_internal_documents):
@@ -348,7 +376,7 @@ async def answer_question(question: str):
             "answer_qa": answer_qa,
             "score_qa": score_qa,
 
-            "relevant_internal_document": relevant_document,
+            "relevant_internal_documents": relevant_documents,
             "answer_internal_documents": answer_internal_documents,
             "score_internal_documents": score_internal_documents,
 

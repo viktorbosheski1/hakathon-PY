@@ -30,6 +30,8 @@ async def ingest_pdf(
         Dictionary with ingestion results
     """
 
+    print("-------START")
+
     # Initialize managers
     pdf_processor = PDFProcessor()
 

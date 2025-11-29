@@ -15,22 +15,25 @@ class PDFProcessor:
         self.processing_strategy = processing_strategy
     
     def process_docling(self, file_path: str) -> Tuple[List[str], List[int]]:
+        try:
+            converter = DocumentConverter()
 
-        converter = DocumentConverter(
-            converters=["pdfminer"],  # Using pdfminer for PDF extraction
-            ocr_languages=None  # No OCR for now
-        )
+            # Load PDF using Docling with pre-configured converter
+            result = converter.convert(file_path)
+            
+            markdown_content = result.document.export_to_markdown(page_break_placeholder="<page>")
+            
+            print(len(markdown_content))
 
-        # Load PDF using Docling with pre-configured converter
-        result = converter.convert(file_path)
-        
-        markdown_content = result.document.export_to_markdown(page_break_placeholder="<page>")
-        
-        text_chunks = markdown_content.split("<page>")
-        overlap_chunks = self.add_overlap(text_chunks, overlap_ratio=0.5)
-        page_numbers = list(range(1, len(text_chunks) + 1))
+            text_chunks = markdown_content.split("<page>")
+            overlap_chunks = self.add_overlap(text_chunks, overlap_ratio=0.2)
+            page_numbers = list(range(1, len(text_chunks) + 1))
 
-        return text_chunks, page_numbers
+            return overlap_chunks, page_numbers
+        except Exception as e:
+            print(f"Error in process_docling: {e}")
+            return [], []
+    
     def add_overlap(self, chunks: List[str], overlap_ratio: float) -> List[str]:
         """Add overlap between adjacent chunks"""
         modified_strings = []
@@ -76,13 +79,17 @@ class PDFProcessor:
             # elif self.processing_strategy == "langchain":
             else:
                 raise ValueError(f"Unsupported processing strategy: {self.processing_strategy}")
+            print(f"---------TEST: Completed PDF processing with {len(text_chunks)} chunks")
             return text_chunks, page_numbers
+        
+        except Exception as e:
+            print(f"Error processing PDF: {e}")
+            return [], []
         
         finally:
             # Clean up temporary file
             if tmp_file_path and os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
-            return [], []
     
     def validate_pdf(self, filename: str) -> bool:
         """
