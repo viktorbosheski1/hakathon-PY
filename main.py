@@ -338,7 +338,6 @@ async def answer_question(question: str):
             try:
                 llm_response = llm_helper.get_internal_documents_answer(
                     question=question,
-                    answer_qa=answer_qa,
                     relevant_documents=relevant_documents
                 )
                 answer_internal_documents = llm_response.get("answer", "")

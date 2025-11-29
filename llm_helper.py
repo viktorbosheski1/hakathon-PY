@@ -180,7 +180,6 @@ class LLMHelper:
     def get_internal_documents_answer(
         self,
         question: str,
-        answer_qa: str,
         relevant_documents: List[str],
         system_prompt_name: str = "internal_docs_system",
         user_prompt_name: str = "internal_docs_user"
