@@ -43,7 +43,7 @@ async def ingest_pdf(
             content = f.read()
         
         # Process PDF
-        text_chunks, page_numbers = await pdf_processor.process_pdf(content, file_path)
+        text_chunks, page_numbers = await pdf_processor.process_pdf(content)
         
         # Generate unique document ID
         doc_id = str(uuid.uuid4())
