@@ -153,6 +153,7 @@ Data will be stored in `./chroma_db` directory.
 Once the server is running, visit:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+#
 
 ## Requirements
 
