@@ -1,6 +1,6 @@
 from typing import List, Tuple
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from docling.document_converter import DocumentConverter
+# from langchain.text_splitter import RecursiveCharacterTextSplitter
 import tempfile
 import os
 
@@ -8,23 +8,31 @@ import os
 class PDFProcessor:
     """Handles PDF document processing and text extraction"""
     
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200, chunk_by_page: bool = True):
+    def __init__(self, processing_strategy="docling"):
         """
         Initialize PDF processor
-        
-        Args:
-            chunk_size: Size of text chunks (used only if chunk_by_page=False)
-            chunk_overlap: Overlap between chunks (used only if chunk_by_page=False)
-            chunk_by_page: If True, creates one chunk per page. If False, uses character-based chunking
         """
-        self.chunk_by_page = chunk_by_page
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            length_function=len,
-        )
+        self.processing_strategy = processing_strategy
     
-    async def process_pdf(self, file_content: bytes, filename: str) -> Tuple[List[str], List[int]]:
+    def process_docling(self, file_path: str) -> Tuple[List[str], List[int]]:
+
+        converter = DocumentConverter(
+            converters=["pdfminer"],  # Using pdfminer for PDF extraction
+            ocr_languages=None  # No OCR for now
+        )
+
+        # Load PDF using Docling with pre-configured converter
+        result = converter.convert(file_path)
+        
+        markdown_content = result.document.export_to_markdown(page_break_placeholder="<page>")
+        
+        text_chunks = markdown_content.split("<page>")
+        page_numbers = list(range(1, len(text_chunks) + 1))
+
+        return text_chunks, page_numbers
+
+
+    async def process_pdf(self, file_content: bytes) -> Tuple[List[str], List[int]]:
         """
         Process PDF file and extract text chunks
         
@@ -43,26 +51,18 @@ class PDFProcessor:
                 tmp_file.write(file_content)
                 tmp_file_path = tmp_file.name
             
-            # Load PDF using LangChain
-            loader = PyPDFLoader(tmp_file_path)
-            pages = loader.load()
-            
-            if self.chunk_by_page:
-                # Create one chunk per page
-                text_chunks = [page.page_content for page in pages]
-                page_numbers = [page.metadata.get("page", idx) for idx, page in enumerate(pages)]
+            if self.processing_strategy == "docling":
+                text_chunks, page_numbers = self.process_docling(tmp_file_path)
+            # elif self.processing_strategy == "langchain":
             else:
-                # Split documents into chunks by character count
-                chunks = self.text_splitter.split_documents(pages)
-                text_chunks = [chunk.page_content for chunk in chunks]
-                page_numbers = [chunk.metadata.get("page", 0) for chunk in chunks]
-            
+                raise ValueError(f"Unsupported processing strategy: {self.processing_strategy}")
             return text_chunks, page_numbers
         
         finally:
             # Clean up temporary file
             if tmp_file_path and os.path.exists(tmp_file_path):
                 os.unlink(tmp_file_path)
+            return [], []
     
     def validate_pdf(self, filename: str) -> bool:
         """

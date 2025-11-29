@@ -115,6 +115,87 @@
 			"response": []
 		},
 		{
+			"name": "Ingest Internal Document (PDF)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": []
+						},
+						{
+							"key": "document_type",
+							"value": "internal-document",
+							"type": "text"
+						},
+						{
+							"key": "department",
+							"value": "IT",
+							"type": "text"
+						},
+						{
+							"key": "tags",
+							"value": "policy,security",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/ingest-document",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"ingest-document"
+					]
+				},
+				"description": "Ingest an internal PDF document into ChromaDB with embeddings"
+			},
+			"response": []
+		},
+		{
+			"name": "Ingest Q&A Document (Excel)",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "formdata",
+					"formdata": [
+						{
+							"key": "file",
+							"type": "file",
+							"src": []
+						},
+						{
+							"key": "document_type",
+							"value": "questions-and-answers",
+							"type": "text"
+						},
+						{
+							"key": "source",
+							"value": "Compliance FAQ 2025",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "{{base_url}}/ingest-document",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"ingest-document"
+					]
+				},
+				"description": "Ingest Q&A pairs from Excel file into PostgreSQL with embeddings"
+			},
+			"response": []
+		},
+		{
 			"name": "Search Documents",
 			"request": {
 				"method": "GET",
@@ -212,6 +293,24 @@
 					]
 				},
 				"description": "Delete a specific document and all its chunks by document ID"
+			},
+			"response": []
+		},
+		{
+			"name": "Delete All Documents",
+			"request": {
+				"method": "DELETE",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/documents",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"documents"
+					]
+				},
+				"description": "Delete all documents and chunks from the database"
 			},
 			"response": []
 		}

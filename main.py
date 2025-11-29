@@ -1,10 +1,14 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse
 from typing import Optional
 import uuid
 
 from database import ChromaDBManager
 from pdf_processor import PDFProcessor
+from ingest_doc import ingest_pdf, ingest_qa
+
+import tempfile
+import os
 
 app = FastAPI(title="Compliance Questions AI Assistant")
 
@@ -41,71 +45,83 @@ async def health_check():
     return health_status
 
 
-@app.post("/upload-pdf")
-async def upload_pdf(
+@app.post("/ingest-document")
+async def ingest_doc(
     file: UploadFile = File(...),
-    document_type: Optional[str] = "compliance",
-    department: Optional[str] = None,
-    tags: Optional[str] = None
+    document_type: str = Form("internal-document"),
+    department: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    source: Optional[str] = Form(None)
 ):
     """
-    Upload and embed a PDF document into ChromaDB
+    Upload and embed a document into ChromaDB or PostgreSQL
     
     Parameters:
-    - file: PDF file to upload
-    - document_type: Type of document (default: compliance)
+    - file: file to upload (PDF for internal-document, Excel for questions-and-answers)
+    - document_type: Type of document (internal-document or questions-and-answers)
     - department: Department associated with the document
     - tags: Comma-separated tags for the document
+    - source: Source name for Q&A (optional, defaults to filename)
     """
-    # Validate file type
-    if not pdf_processor.validate_pdf(file.filename):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
     
     try:
-        # Read file content
-        content = await file.read()
+        # Determine file extension
+        file_ext = file.filename.lower().split('.')[-1]
         
-        # Process PDF
-        text_chunks, page_numbers = await pdf_processor.process_pdf(content, file.filename)
+        # Save uploaded file temporarily
+        suffix = f'.{file_ext}'
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+
+        # Strip whitespace and validate document_type
+        document_type = document_type.strip() if document_type else "internal-document"
+        print(f"Document type: '{document_type}', File extension: '{file_ext}'")
+
+        if document_type == 'internal-document':
+            # Validate PDF
+            if file_ext != 'pdf':
+                raise ValueError("Internal documents must be PDF files")
+            
+            # Use ingest_pdf function
+            result = await ingest_pdf(
+                file_path=tmp_file_path,
+                document_type=document_type,
+                department=department,
+                tags=tags
+            )
+        elif document_type == 'questions-and-answers':
+            # Validate Excel
+            if file_ext not in ['xlsx', 'xls']:
+                raise ValueError("Q&A documents must be Excel files (.xlsx or .xls)")
+            
+            # Use ingest_qa function
+            result = await ingest_qa(
+                file_path=tmp_file_path,
+                source=source or file.filename
+            )
+        else:
+            raise ValueError(f"Unsupported document type: {document_type}")
         
-        # Generate unique document ID
-        doc_id = str(uuid.uuid4())
+        # Update filename in result
+        result["filename"] = file.filename
         
-        # Prepare tags
-        tag_list = [tag.strip() for tag in tags.split(",")] if tags else None
+        return result
         
-        # Store in ChromaDB
-        stored_chunks = db_manager.add_document_chunks(
-            chunks=text_chunks,
-            doc_id=doc_id,
-            filename=file.filename,
-            document_type=document_type,
-            department=department,
-            tags=tag_list,
-            page_numbers=page_numbers
-        )
-        
-        return {
-            "status": "success",
-            "message": "PDF document successfully embedded",
-            "document_id": doc_id,
-            "filename": file.filename,
-            "chunks_stored": stored_chunks,
-            "metadata": {
-                "document_type": document_type,
-                "department": department,
-                "tags": tag_list
-            }
-        }
-    
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing document: {str(e)}")
+    
+    finally:
+        # Clean up temporary file
+        if 'tmp_file_path' in locals() and os.path.exists(tmp_file_path):
+            os.unlink(tmp_file_path)
 
 
 @app.get("/search")
 async def search_documents(
     query: str,
-    n_results: int = 5,
+    n_results: int = 1,
     document_type: Optional[str] = None,
     department: Optional[str] = None
 ):
@@ -167,6 +183,22 @@ async def delete_document(document_id: str):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}")
+
+
+@app.delete("/documents")
+async def delete_all_documents():
+    """Delete all documents from the database"""
+    try:
+        chunks_deleted = db_manager.delete_all_documents()
+        
+        return {
+            "status": "success",
+            "message": "All documents deleted",
+            "chunks_deleted": chunks_deleted
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting all documents: {str(e)}")
 
 
 

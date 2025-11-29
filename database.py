@@ -15,19 +15,16 @@ class ChromaDBManager:
         self.use_remote = os.getenv("USE_REMOTE_CHROMA", "false").lower() == "true"
         
         # Initialize Azure OpenAI Embeddings
-        azure_endpoint = os.getenv("AZURE_TARGET_URL_EMBEDDING")
-        azure_api_key = os.getenv("AZURE_API_KEY_EMBEDDING")
-        
-        # Extract deployment name and base URL from the endpoint
-        # Format: https://{resource}.cognitiveservices.azure.com/openai/deployments/{deployment}/embeddings?api-version={version}
-        deployment_name = os.getenv("API_EMBEDDING_MODEL_NAME")
-        azure_base_url = os.getenv("AZURE_TARGET_URL_EMBEDDING")
+        azure_endpoint = os.getenv("AZURE_ENDPOINT")
+        azure_api_key = os.getenv("AZURE_API_KEY")
+        deployment_name = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-3-large")
+        azure_api_version = os.getenv("EMBEDDING_API_VERSION", "2024-12-01-preview")
         
         self.embeddings_model = AzureOpenAIEmbeddings(
-            azure_endpoint=azure_base_url,
+            azure_endpoint=azure_endpoint,
             azure_deployment=deployment_name,
             api_key=azure_api_key,
-            api_version=os.getenv("API_VERSION_EMBEDDING", "2024-12-01-preview")
+            api_version=azure_api_version
         )
         
         self.client = self._initialize_client()
@@ -131,7 +128,7 @@ class ChromaDBManager:
     def search_documents(
         self,
         query: str,
-        n_results: int = 5,
+        n_results: int = 1,
         document_type: Optional[str] = None,
         department: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -171,11 +168,20 @@ class ChromaDBManager:
         formatted_results = []
         if results and results['ids']:
             for idx in range(len(results['ids'][0])):
+                # Convert distance to similarity score (0 to 1)
+                # ChromaDB returns L2 distance by default, convert to cosine similarity
+                distance = results['distances'][0][idx] if 'distances' in results else None
+                
+                # Convert L2 distance to similarity: similarity = 1 / (1 + distance)
+                # This normalizes the score between 0 and 1, where 1 is most similar
+                similarity = 1 / (1 + distance) if distance is not None else None
+                
                 formatted_results.append({
                     "id": results['ids'][0][idx],
                     "content": results['documents'][0][idx],
                     "metadata": results['metadatas'][0][idx],
-                    "distance": results['distances'][0][idx] if 'distances' in results else None
+                    "similarity": similarity,
+                    "distance": distance
                 })
         
         return formatted_results
@@ -229,6 +235,27 @@ class ChromaDBManager:
         
         if not results['ids']:
             raise ValueError("Document not found")
+        
+        # Delete all chunks
+        self.collection.delete(ids=results['ids'])
+        
+        return len(results['ids'])
+    
+    def delete_all_documents(self) -> int:
+        """
+        Delete all documents from the collection
+        
+        Returns:
+            Number of chunks deleted
+        """
+        if not self.collection:
+            raise Exception("ChromaDB collection not initialized")
+        
+        # Get all items from collection
+        results = self.collection.get()
+        
+        if not results['ids']:
+            return 0
         
         # Delete all chunks
         self.collection.delete(ids=results['ids'])
