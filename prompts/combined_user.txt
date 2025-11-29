@@ -1,0 +1,13 @@
+Question: {question}
+
+Answer from Q&A Database:
+{answer_qa}
+
+Answer from Internal Documents:
+{answer_internal_documents}
+
+Please synthesize these two answers into a single, comprehensive response. Consider both sources and create the best possible answer that combines their insights.
+
+Respond with a JSON object containing:
+- "answer": Your synthesized, comprehensive answer
+- "score": Your confidence score (0.0 to 1.0) in this combined answer

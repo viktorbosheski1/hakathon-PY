@@ -43,77 +43,7 @@
 			},
 			"response": []
 		},
-		{
-			"name": "Upload PDF Document",
-			"request": {
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "formdata",
-					"formdata": [
-						{
-							"key": "file",
-							"type": "file",
-							"src": []
-						},
-						{
-							"key": "document_type",
-							"value": "compliance",
-							"type": "text"
-						},
-						{
-							"key": "department",
-							"value": "Legal",
-							"type": "text"
-						},
-						{
-							"key": "tags",
-							"value": "gdpr,privacy,regulation",
-							"type": "text"
-						}
-					]
-				},
-				"url": {
-					"raw": "{{base_url}}/upload-pdf",
-					"host": [
-						"{{base_url}}"
-					],
-					"path": [
-						"upload-pdf"
-					]
-				},
-				"description": "Upload a PDF document and embed it into ChromaDB with metadata"
-			},
-			"response": []
-		},
-		{
-			"name": "Upload PDF - Minimal",
-			"request": {
-				"method": "POST",
-				"header": [],
-				"body": {
-					"mode": "formdata",
-					"formdata": [
-						{
-							"key": "file",
-							"type": "file",
-							"src": []
-						}
-					]
-				},
-				"url": {
-					"raw": "{{base_url}}/upload-pdf",
-					"host": [
-						"{{base_url}}"
-					],
-					"path": [
-						"upload-pdf"
-					]
-				},
-				"description": "Upload a PDF document with only required parameters (file)"
-			},
-			"response": []
-		},
+
 		{
 			"name": "Ingest Internal Document (PDF)",
 			"request": {
@@ -153,7 +83,7 @@
 						"ingest-document"
 					]
 				},
-				"description": "Ingest an internal PDF document into ChromaDB with embeddings"
+				"description": "Ingest an internal PDF document into ChromaDB with embeddings. File must be PDF format. Optional parameters: department, tags (comma-separated)."
 			},
 			"response": []
 		},
@@ -191,22 +121,22 @@
 						"ingest-document"
 					]
 				},
-				"description": "Ingest Q&A pairs from Excel file into PostgreSQL with embeddings"
+				"description": "Ingest Q&A pairs from Excel file into PostgreSQL with embeddings. File must be .xlsx or .xls format with columns: 'Question' and 'Answer'. Optional parameter: source (defaults to filename)."
 			},
 			"response": []
 		},
 		{
-			"name": "Search Documents",
+			"name": "Search Internal Documents",
 			"request": {
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{base_url}}/search?query=data protection&n_results=5",
+					"raw": "{{base_url}}/search_internal_documents?query=data protection&n_results=5",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
-						"search"
+						"search_internal_documents"
 					],
 					"query": [
 						{
@@ -219,22 +149,22 @@
 						}
 					]
 				},
-				"description": "Search for documents using natural language query"
+				"description": "Search for internal documents using natural language query. Returns content, metadata, and similarity scores."
 			},
 			"response": []
 		},
 		{
-			"name": "Search Documents - With Filters",
+			"name": "Search Internal Documents - With Filters",
 			"request": {
 				"method": "GET",
 				"header": [],
 				"url": {
-					"raw": "{{base_url}}/search?query=compliance requirements&n_results=3&document_type=compliance&department=Legal",
+					"raw": "{{base_url}}/search_internal_documents?query=compliance requirements&n_results=3&document_type=internal-document&department=Legal",
 					"host": [
 						"{{base_url}}"
 					],
 					"path": [
-						"search"
+						"search_internal_documents"
 					],
 					"query": [
 						{
@@ -247,7 +177,7 @@
 						},
 						{
 							"key": "document_type",
-							"value": "compliance"
+							"value": "internal-document"
 						},
 						{
 							"key": "department",
@@ -255,7 +185,59 @@
 						}
 					]
 				},
-				"description": "Search for documents with filters by document type and department"
+				"description": "Search for internal documents with filters by document type and department. Returns similarity scores."
+			},
+			"response": []
+		},
+		{
+			"name": "Search Q&A",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/search_qa?query=What is the data retention policy?&n_results=1",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"search_qa"
+					],
+					"query": [
+						{
+							"key": "query",
+							"value": "What is the data retention policy?"
+						},
+						{
+							"key": "n_results",
+							"value": "1"
+						}
+					]
+				},
+				"description": "Search Q&A database in PostgreSQL using vector similarity with recency boost. Returns question (query), answer, and boosted similarity score (0-1). Recency boost uses exponential decay rate of 0.2 based on row position (newer rows at bottom get higher scores)."
+			},
+			"response": []
+		},
+		{
+			"name": "Answer Question",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{base_url}}/answer-question?question=What are the data retention requirements?",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"answer-question"
+					],
+					"query": [
+						{
+							"key": "question",
+							"value": "What are the data retention requirements?"
+						}
+					]
+				},
+				"description": "Get comprehensive answer using 4-step combined approach:\n1. Search Q&A database (PostgreSQL with recency boost)\n2. Search internal documents (ChromaDB)\n3. LLM generates answer from internal documents context\n4. LLM generates final combined answer\n\nReturns 6 values:\n- answer_qa: Direct answer from Q&A database\n- answer_internal_documents: LLM answer based on internal documents\n- answer_combined: Final LLM answer combining both sources\n- score_qa: Similarity score for Q&A match (0-1)\n- score_internal_documents: Confidence score for internal docs answer (0-1)\n- score_combined: Confidence score for combined answer (0-1)\n\nUses Azure OpenAI gpt-5-mini model for reasoning."
 			},
 			"response": []
 		},

@@ -27,10 +27,30 @@ class PDFProcessor:
         markdown_content = result.document.export_to_markdown(page_break_placeholder="<page>")
         
         text_chunks = markdown_content.split("<page>")
+        overlap_chunks = self.add_overlap(text_chunks, overlap_ratio=0.5)
         page_numbers = list(range(1, len(text_chunks) + 1))
 
         return text_chunks, page_numbers
-
+    def add_overlap(self, chunks: List[str], overlap_ratio: float) -> List[str]:
+        """Add overlap between adjacent chunks"""
+        modified_strings = []
+       
+        for i, current_page in enumerate(chunks):
+            prev_overlap = ""
+            next_overlap = ""
+ 
+            if i > 0:
+                prev_len = int(len(chunks[i - 1]) * overlap_ratio)
+                prev_overlap = chunks[i - 1][-prev_len:]
+ 
+            if i < len(chunks) - 1:
+                next_len = int(len(chunks[i + 1]) * overlap_ratio)
+                next_overlap = chunks[i + 1][:next_len]
+ 
+            modified_page = prev_overlap + current_page + next_overlap
+            modified_strings.append(modified_page)
+       
+        return modified_strings
 
     async def process_pdf(self, file_content: bytes) -> Tuple[List[str], List[int]]:
         """

@@ -1,0 +1,12 @@
+Question: {question}
+
+Q&A Database Answer: {answer_qa}
+
+Relevant Internal Document Content:
+{relevant_document}
+
+Please analyze the internal document content and provide a comprehensive answer to the question. Consider the Q&A database answer as additional context if relevant, but prioritize the information from the internal document.
+
+Respond with a JSON object containing:
+- "answer": Your comprehensive answer based on the internal document
+- "score": Your confidence score (0.0 to 1.0) in this answer

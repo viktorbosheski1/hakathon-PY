@@ -145,36 +145,59 @@ class ChromaDBManager:
             List of search results with metadata
         """
         if not self.collection:
+            print("ChromaDB collection not initialized")
             raise Exception("ChromaDB collection not initialized")
+        
+        print(f"Searching ChromaDB for: {query} (n_results={n_results})")
         
         # Generate query embedding
         query_embedding = self.embeddings_model.embed_query(query)
+        print(f"Generated embedding with {len(query_embedding)} dimensions")
         
         # Prepare where filter
-        where_filter = {}
-        if document_type:
-            where_filter["document_type"] = document_type
-        if department:
-            where_filter["department"] = department
+        where_filter = None
+        if document_type and department:
+            # Use $and operator for multiple conditions
+            where_filter = {
+                "$and": [
+                    {"document_type": document_type},
+                    {"department": department}
+                ]
+            }
+        elif document_type:
+            where_filter = {"document_type": document_type}
+        elif department:
+            where_filter = {"department": department}
+        
+        print(f"Using filter: {where_filter}")
         
         # Search in ChromaDB
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
-            where=where_filter if where_filter else None
+            where=where_filter
         )
+        
+        print(f"ChromaDB query returned: {len(results['ids'][0]) if results and results['ids'] else 0} results")
         
         # Format results
         formatted_results = []
         if results and results['ids']:
             for idx in range(len(results['ids'][0])):
-                # Convert distance to similarity score (0 to 1)
-                # ChromaDB returns L2 distance by default, convert to cosine similarity
+                # ChromaDB returns distances (lower = more similar)
                 distance = results['distances'][0][idx] if 'distances' in results else None
                 
-                # Convert L2 distance to similarity: similarity = 1 / (1 + distance)
-                # This normalizes the score between 0 and 1, where 1 is most similar
-                similarity = 1 / (1 + distance) if distance is not None else None
+                # Convert distance to similarity score (0 to 1)
+                # ChromaDB uses squared L2 distance by default
+                if distance is not None:
+                    import math
+                    # Take square root to get actual L2 distance
+                    actual_distance = math.sqrt(distance) if distance >= 0 else 0
+                    # Convert to similarity: 1 / (1 + distance)
+                    # Lower distances yield higher similarity scores
+                    similarity = 1 / (1 + actual_distance)
+                else:
+                    similarity = None
                 
                 formatted_results.append({
                     "id": results['ids'][0][idx],
@@ -184,6 +207,7 @@ class ChromaDBManager:
                     "distance": distance
                 })
         
+        print(f"Returning {len(formatted_results)} formatted results")
         return formatted_results
     
     def list_all_documents(self) -> List[Dict[str, Any]]:
