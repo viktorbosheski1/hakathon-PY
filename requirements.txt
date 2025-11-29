@@ -13,3 +13,4 @@ langfuse
 psycopg2-binary
 pandas
 openpyxl
+docling
